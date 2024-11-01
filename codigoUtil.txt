@@ -1,0 +1,15 @@
+Python:
+
+ME AYUDA A SABER QUE TIPO DE CONTENIDO (JSON, HTML, OTRO) ES
+
+content_type = response.headers.get("Content-Type")
+print("Content-Type:", content_type)
+
+if "application/json" in content_type:
+    data = response.json()
+    print("Data in JSON format:", data)
+elif "text/html" in content_type:
+    data = response.text
+    print("Data in HTML form:", data[:500])
+else:
+    print("Unknown content type:", content_type)
