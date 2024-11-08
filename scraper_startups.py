@@ -3,12 +3,94 @@ from bs4 import BeautifulSoup
 import pandas as pd
 from loguru import logger
 
-url = "https://startit-x.com/index.php/actions/sprig-core/components/render"
-page_number = 1  
-startups_data = []
-max_pages = 1
+URL = "https://startit-x.com/index.php/actions/sprig-core/components/render"
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-params = {
+def get_max_pages(params):
+    response = requests.get(URL, params=params, headers=HEADERS)
+    if response.status_code != 200:
+        logger.error(f"Error al obtener el número total de páginas: {response.status_code}")
+        return 1
+    
+    soup = BeautifulSoup(response.text, "html.parser")
+    pagination = soup.find("nav", class_="Nav--pagination")
+    if not pagination:
+        logger.error("No se encontró el elemento 'nav' con clase 'Nav--pagination'.")
+        return 1
+    
+    nav_list = pagination.find("ul", class_="Nav-list")
+    if not nav_list:
+        logger.error("No se encontró el elemento 'ul' con clase 'Nav-list'.")
+        return 1
+    
+    nav_items = nav_list.find_all("li", class_="Nav-item")
+    logger.info(f"Encontrados {len(nav_items)} elementos de paginación.")
+    
+    for item in reversed(nav_items):
+        link_tag = item.find("a", class_="Nav-link")
+        if link_tag and link_tag.text.isdigit():
+            logger.info(f"Última página detectada: {link_tag.text}")
+            return int(link_tag.text)
+    
+    logger.warning("No se encontró un número válido en los elementos de paginación.")
+    return 1
+
+def fetch_startup_data(page_number, params):
+    logger.info(f"Obteniendo datos de la página {page_number}")
+    response = requests.get(URL, params={**params, "page": page_number}, headers=HEADERS)
+    
+    if response.status_code != 200:
+        logger.error(f"Fallo al obtener la página {page_number}. Estado: {response.status_code}")
+        return []
+    
+    soup = BeautifulSoup(response.text, "html.parser")
+    startups_data = []
+    
+    for card_wrapper in soup.find_all("div", class_="CardWrapper CardWrapper--clients"):
+        for body in card_wrapper.find_all("div", class_="Card Card--clients"):
+            startup = body.find("div", class_="Card-body")
+            if not startup:
+                continue
+            
+            name = get_text(startup.find("h3", class_="Card-title"))
+            year, industries = get_meta_data(startup.find("div", class_="Card-meta"))
+            social_links = get_social_links(startup.find("ul", class_="Card-socials"))
+            
+            startups_data.append({
+                "Name": name,
+                "Year": year,
+                "Industries": industries,
+                "Social Links": social_links
+            })
+    
+    logger.info(f"Página {page_number} completa.")
+    return startups_data
+
+def get_text(element):
+    return element.text.strip() if element else "N/A"
+
+def get_meta_data(meta_div):
+    if not meta_div:
+        return "N/A", []
+    
+    year = get_text(meta_div.find("span", class_="Card-year"))
+    industries = [industry.text.strip() for industry in meta_div.find_all("span", class_="Card-industry")] if meta_div else []
+    return year, industries
+
+def get_social_links(social_section):
+    if not social_section:
+        return []
+    
+    social_links = []
+    for item in social_section.find_all("li", class_="Card-socialsItem"):
+        link_tag = item.find("a", class_="Card-socialsLink", href=True)
+        if link_tag:
+            social_links.append(link_tag["href"])
+    return social_links
+
+def main():
+    page_number = 1
+    params = {
         "year[]": "2024",
         "search": "",
         "sprig:siteId": "9a161aa43461156175c50380f7e86fc1dd31bf173298b8309d921801a95076cf6",
@@ -23,87 +105,16 @@ params = {
         "page": page_number
     }
 
-response = requests.get(url, params=params, headers={"User-Agent": "Mozilla/5.0"})
-if response.status_code == 200:
-    soup = BeautifulSoup(response.text, "html.parser")
-    pagination = soup.find("nav", class_="Nav--pagination")
-    if pagination:
-        nav_list = pagination.find("ul", class_="Nav-list")
-        if nav_list:
-            nav_items = nav_list.find_all("li", class_="Nav-item")
-            logger.info(f"Encontrados {len(nav_items)} elementos de paginación.")
-            for item in reversed(nav_items):
-                link_tag = item.find("a", class_="Nav-link")
-                if link_tag and link_tag.text.isdigit():
-                    max_pages = int(link_tag.text)  
-                    logger.info(f"Última página detectada: {max_pages}")
-                    break
-            else:
-                logger.warning("No se encontró un número válido en los elementos de paginación.")
-        else:
-            logger.error("No se encontró el elemento 'ul' con clase 'Nav-list'.")
-    else:
-        logger.error("No se encontró el elemento 'nav' con clase 'Nav--pagination'.")
-else:
-    logger.error(f"Error al obtener el número total de páginas: {response.status_code}")
+    max_pages = get_max_pages(params)
+    all_startups_data = []
 
-
-while page_number <= max_pages:
-
-    logger.info(f"Obteniendo data de la pagina {page_number}")
-    response = requests.get(url, params={**params, "page": page_number}, headers={"User-Agent": "Mozilla/5.0"})
-
-    if response.status_code == 200:
-        soup = BeautifulSoup(response.text, "html.parser")
-        startups_container = soup.find_all("div", class_="CardWrapper CardWrapper--clients")
-
-        for card_wrapper in startups_container:
-            card_body = card_wrapper.find_all("div", class_="Card Card--clients")
-
-            for body in card_body:
-                startup = body.find("div", class_="Card-body")
-
-                if startup:
-                    # Obtener el nombre de la startup
-                    name_element = startup.find("h3", class_="Card-title")
-                    name = name_element.text.strip() if name_element else "N/A"
-
-                    
-                    meta_div = startup.find("div", class_="Card-meta")
-                    if meta_div:
-                        year_element = meta_div.find("span", class_="Card-year")
-                        year = year_element.text.strip() if year_element else "N/A"
-                        industries = [industry.text.strip() for industry in meta_div.find_all("span", class_="Card-industry")] if meta_div.find_all("span", class_="Card-industry") else []
-                    else:
-                        year = "N/A"
-                        industries = []
-
-                    
-                    social_links = []
-                    social_section = startup.find("ul", class_="Card-socials")
-                    if social_section:
-                        social_items = social_section.find_all("li", class_="Card-socialsItem")
-                        for item in social_items:
-                            link_tag = item.find("a", class_="Card-socialsLink", href=True)
-                            if link_tag:
-                                link = link_tag["href"]
-                                social_links.append(link)
-                            
-
-                    startups_data.append({
-                        "Name": name,
-                        "Year": year,
-                        "Industries": industries,
-                        "Social Links": social_links
-                    })
-
-        print(f"Página {page_number} completa.")
+    while page_number <= max_pages:
+        all_startups_data.extend(fetch_startup_data(page_number, params))
         page_number += 1
 
-    else:
-        logger.error(f"Fallo al obtener la página {page_number}. Estado: {response.status_code}")
-        break
+    df_startups = pd.DataFrame(all_startups_data)
+    df_startups.to_csv("startups_2024.csv", index=False)
+    print("Los datos se han guardado en 'startups_2024.csv'.")
 
-df_startups = pd.DataFrame(startups_data)
-df_startups.to_csv("startups_2024.csv", index=False)
-print("Los datos se han guardado en 'startups_2024.csv'.")
+if __name__ == "__main__":
+    main()
